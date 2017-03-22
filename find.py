@@ -13,12 +13,12 @@ from glob import glob
 
 
 ####################################################
-#   Some pre-designed pre-designed bboxes utils    #
+#   Some pre-designed bboxes utils                 #
 ####################################################
-infected_scales = [1.0, 1.2]
-heat_tres = 2
+infected_scales = [1.2]
+heat_tres = 2 # the detector believe an area where at least two boxes overlap.
 
-def box_generator(yoi, xoi, yd_ratio = 0.1, scales = [1.2,2.0,2.5,3.0,3.6], xover = 0.6):
+def box_generator(yoi, xoi, yd_ratio = 0.1, scales = [1.2,1.5,2.0,2.5,3.0], xover = 0.6):
 
     """
     a windows generator that gives a the searching strategy
@@ -60,7 +60,7 @@ def box_generator(yoi, xoi, yd_ratio = 0.1, scales = [1.2,2.0,2.5,3.0,3.6], xove
 
 
 
-def infected_box(box, bias = 0.2, scales = infected_scales):
+def infected_box(box, bias = 0.07, scales = infected_scales):
     """
     generate 8 neiggboring windows for a given box
 
@@ -201,7 +201,10 @@ class car_detector:
                         win_draw = np.int(window*scale)
                         bboxes.append(((xbox_left, ytop_draw+ystart),(xbox_left+win_draw,ytop_draw+win_draw+ystart)))
 
-        return bboxes
+        result_boxes = bboxes + self.cached_bboxes_1 + self.cached_bboxes_2
+        self.cached_bboxes_2 = self.cached_bboxes_1
+        self.cached_bboxes_1 = bboxes
+        return result_boxes
 
 
 
@@ -256,6 +259,7 @@ class car_detector:
         self.lazy_info = boxes_info
 
     def _lazy_search(self, img):
+        h, w = img.shape[0], img.shape[1]
         if not self.cached_lazy:
             self.cached_lazy = self._window_search(img)
             return self.cached_lazy
@@ -263,17 +267,17 @@ class car_detector:
             # exhaustedly search neighboring boxes
             lazy_bboxes = self._window_search(img, lazy = True)
             for box in self.cached_lazy:
-                neiggbors = infected_box(box)
-                for neiggbor in neiggbors:
-                    x_a, y_a = neiggbor[0]
-                    x_b, y_b = neiggbor[1]
+                neigbors = infected_box(box)
+                for neigbor in neigbors:
+                    x_a, y_a = max(neigbor[0][0], 0), max(neigbor[0][1], 0)
+                    x_b, y_b = min(neigbor[1][0], w - 1), min(neigbor[1][1], h - 1)
                     subimg = cv2.resize(img[y_a:y_b, x_a:x_b], (window, window))
                     feat = self.feat_maker.get_feat(subimg).reshape(1, -1)
                     test_feat = self.scaler.transform(feat)
                     test_pred = self.clf.predict(test_feat)
 
                     if test_pred == 1:
-                        lazy_bboxes.append(tuple(map(tuple, neiggbor)))
+                        lazy_bboxes.append(tuple(map(tuple, neigbor)))
             result_boxes = lazy_bboxes
             return result_boxes
 
@@ -289,14 +293,14 @@ class car_detector:
 
     def _draw_car_box(self, img, heatmap):
         labels = label(heatmap)
-        self.cache_lazy = []
+        self.cached_lazy = []
         for car_num in range(1, labels[1] + 1):
             nonzero = (labels[0] == car_num).nonzero()
             # Identify x and y values of those pixels
             nonzeroy = np.array(nonzero[0])
             nonzerox = np.array(nonzero[1])
             bbox = ((np.min(nonzerox), np.min(nonzeroy)), (np.max(nonzerox), np.max(nonzeroy)))
-            self.cache_lazy.append(inscribed_square(bbox))
+            self.cached_lazy.append(inscribed_square(bbox))
             # self.cached_bboxes_1.append(inscribed_square(bbox))
             cv2.rectangle(img, bbox[0], bbox[1], (0,0,255), 2)
         return img
@@ -327,7 +331,7 @@ class car_detector:
         """
         draw the detecting boxes from window_search
         """
-        car_boxes = self._window_search(im)
+        car_boxes = self._window_search(img)
         for car_box in car_boxes:
             cv2.rectangle(img, car_box[0], car_box[1], color = [0, 255, 0], thickness = 2)
         return img
@@ -339,31 +343,36 @@ class car_detector:
 
 ## Main ##
 
-positions = [(380, 700, 1.5), (380, 700, 1.5), (400, 700, 2.0)]
+positions = [(380, 600, 1.5), (380, 450, 1.5), (500, 700, 2.0)]
 normal_boexs = box_generator((390, 600), (0, 1280))
-lazy_boxes = box_generator((370, 700), (0, 1280), yd_ratio = 0.3, scales = [1.5,2.0,3.0])
+lazy_boxes = box_generator((370, 700), (0, 1280), yd_ratio = 0.5, scales = [1.8,2.0], xover = 0.2)
 out_path = './output_images'
 
 
-def get_video(retrain, nb_per_class = 1000):
-    if retrain:
+def get_video(vf, nb_per_class = None, style = 'designed'):
+    if nb_per_class:
         train_SVC(nb_per_class)
+
     with open('clf.pickle', 'rb') as f:
         clf, scaler, feat_maker = pickle.load(f)
-
-
     detector = car_detector(clf, scaler, feat_maker)
     detector.set_windows(normal_boexs)
     detector.set_lazy(lazy_boxes)
     detector.set_pos(positions)
 
-    video = VideoFileClip('./project_video.mp4')
-    video = video.fl_image(detector.window_find)
-    video.write_videofile('test.mp4', audio = False)
 
-def get_image_result(retrain, input_path, nb_per_class = 1000):
+    style_map = {'designed': detector.window_find,
+                 'block': detector.block_find,
+                 'lazy': detector.lazy_find}
 
-    if retrain:
+    video = VideoFileClip(vf)
+    video = video.fl_image(style_map[style])
+    video.write_videofile('%s_output.mp4'%(vf[:-4]), audio = False)
+    print("video is successfully processed! check out %s_output.mp4"%(vf[:-4]))
+
+def get_image_result(input_path, nb_per_class = None):
+
+    if nb_per_class:
         train_SVC(nb_per_class)
     with open('clf.pickle', 'rb') as f:
         clf, scaler, feat_maker = pickle.load(f)
@@ -384,14 +393,16 @@ def get_image_result(retrain, input_path, nb_per_class = 1000):
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--retrain', action='store_true')
-    parser.add_argument('--nbtrain', nargs = 1)
-    parser.add_argument('--video')
+    parser.add_argument('--filename', required = True, type = str)
+    parser.add_argument('style')
+    parser.add_argument('--retrain', nargs = 1,  type = int)
+
     args = parser.parse_args()
+    f = args.filename
     try:
-        nb_train = int(args.nbtrain[0])
+        nb_train = int(args.retrain[0])
     except:
         nb_train = None
     #get_image_result(args.retrain, './test_images',nb_train)
 
-    get_video(args.retrain,nb_train)
+    get_video(f, nb_train, style = args.style)

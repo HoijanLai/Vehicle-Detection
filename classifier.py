@@ -13,19 +13,20 @@ from sklearn.metrics import fbeta_score
 from sklearn.preprocessing import StandardScaler as Xscaler
 import pickle
 
+
+window = 64 # sampling window (side)
 ###############################
 # params for the hog features #
 ###############################
-cspace = 'YCrCb'    # the color space
 ppc = 16 # pixels per cell
 cpb = 2  # cells per block
 ort = 6  # orientations
-window = 64 # sampling window (side)
 
 #################################
 # params for the color features #
-################################
-spatial_size = (16, 16)
+#################################
+cspace = 'YCrCb'    # the color space
+spatial_size = (8, 8)
 hist_bins = 16
 
 #########################################################
