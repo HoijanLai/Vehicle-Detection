@@ -15,7 +15,7 @@ from glob import glob
 ####################################################
 #   Some pre-designed bboxes utils                 #
 ####################################################
-infected_scales = [1.2]
+
 heat_tres = 2 # the detector believe an area where at least two boxes overlap.
 
 def box_generator(yoi, xoi, yd_ratio = 0.1, scales = [1.2,1.5,2.0,2.5,3.0], xover = 0.6):
@@ -60,7 +60,7 @@ def box_generator(yoi, xoi, yd_ratio = 0.1, scales = [1.2,1.5,2.0,2.5,3.0], xove
 
 
 
-def infected_box(box, bias = 0.07, scales = infected_scales):
+def infected_box(box, bias = 0.1, nb = 2):
     """
     generate 8 neiggboring windows for a given box
 
@@ -73,18 +73,9 @@ def infected_box(box, bias = 0.07, scales = infected_scales):
         a ndarray, boxes
     """
     side = box[1][1] - box[0][1]
-    ss = (np.array(scales)*side).astype(int)
-    bs = [[int(bias*s), int(-bias*s), 0] for s in ss]
-    ss = np.repeat(ss, 8, 0).astype(int)
-    scheme = np.concatenate([np.repeat(list(product(bbs, bbs))[:-1],2,0).reshape(-1,2,2) for bbs in bs])
-    diffs = (ss-side)//2
-
-    x_as = box[0][0] - diffs
-    y_as = box[0][1] - diffs
-    x_bs = x_as + ss
-    y_bs = y_as + ss
-
-    return np.vstack([x_as, y_as, x_bs, y_bs]).T.reshape((-1,2,2)) + scheme
+    b = int(bias*side)
+    scheme = np.random.randint(-b, b, (nb, 2, 2))
+    return box + scheme
 
 
 
@@ -345,7 +336,7 @@ class car_detector:
 
 positions = [(380, 600, 1.5), (380, 450, 1.5), (500, 700, 2.0)]
 normal_boexs = box_generator((390, 600), (0, 1280))
-lazy_boxes = box_generator((370, 700), (0, 1280), yd_ratio = 0.5, scales = [1.8,2.0], xover = 0.2)
+lazy_boxes = box_generator((370, 700), (0, 1280), yd_ratio = 0.3, scales = [1.6,1.8,3.0], xover = 0.4)
 out_path = './output_images'
 
 
