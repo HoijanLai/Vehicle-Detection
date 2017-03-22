@@ -13,13 +13,26 @@ from glob import glob
 
 
 ####################################################
-#   Some pre-designed windows                      #
+#   Some pre-designed pre-designed bboxes utils    #
 ####################################################
-infected_scales = [1]
+infected_scales = [1.0, 1.2]
+heat_tres = 2
 
-def box_generator(yoi, xoi, yd_ratio = 0.17, scales = [1.2,1.8,1.6,1.8,2.0,3.0], xover = 0.9, window = 64):
+def box_generator(yoi, xoi, yd_ratio = 0.1, scales = [1.2,2.0,2.5,3.0,3.6], xover = 0.6):
+
     """
     a windows generator that gives a the searching strategy
+
+    params:
+        yoi, xoi: both are tuple, determine the region of interest
+        yd_ratio: float: how the boxes bias vertically
+        scales: list of float, different sizes of windowss
+        xover: float, overlap rate horizontally
+
+    return:
+        scales: the scales
+        boxes: the boxes in real sizes
+        boxes_scaled: window*window scaled version of boxes
     """
     width = xoi[1] - xoi[0]
 
@@ -34,35 +47,46 @@ def box_generator(yoi, xoi, yd_ratio = 0.17, scales = [1.2,1.8,1.6,1.8,2.0,3.0],
     ytop = [np.ones(nbs[i], dtype = int)*ydists[i] for i in range(len(scales))]
     ybtm = [ytop[i] + sizes[i] for i in range(len(scales))]
 
-    wins = [np.vstack([xleft[i], ytop[i], xright[i],ybtm[i]]).T.reshape([-1, 2, 2]) for i in range(len(scales))]
+    boxes = [np.vstack([xleft[i], ytop[i], xright[i],ybtm[i]]).T.reshape([-1, 2, 2]) for i in range(len(scales))]
 
-    wins_scaled = []
+    boxes_scaled = []
     for i in range(len(scales)):
-        a = wins[i][:,0]/scales[i]
-        wins_scaled.append(np.hstack([a, a + window]).reshape((-1, 2, 2)).astype(int))
+        a = boxes[i][:,0]/scales[i]
+        boxes_scaled.append(np.hstack([a, a + window]).reshape((-1, 2, 2)).astype(int))
 
-    return scales, wins, wins_scaled
+    return scales, boxes, boxes_scaled
 
-def infected_box(box, bias = 20, scales = infected_scales):
+
+
+
+
+def infected_box(box, bias = 0.2, scales = infected_scales):
     """
-    generate 8 neiggboring windows for a given window
+    generate 8 neiggboring windows for a given box
+
+    params:
+        box: opencv standard box
+        bias: int
+        scales: the neighbors can vary in size
+
+    return:
+        a ndarray, boxes
     """
     side = box[1][1] - box[0][1]
+    ss = (np.array(scales)*side).astype(int)
+    bs = [[int(bias*s), int(-bias*s), 0] for s in ss]
+    ss = np.repeat(ss, 8, 0).astype(int)
+    scheme = np.concatenate([np.repeat(list(product(bbs, bbs))[:-1],2,0).reshape(-1,2,2) for bbs in bs])
+    diffs = (ss-side)//2
 
-    bs = [bias, -bias, 0]
-    scheme = [np.repeat(list(product(bs, bs))[:-1],2,0).reshape(-1,2,2) for scl in scales]
-    ss = [np.repeat([int(scl*side)], 8, 0) for scl in scales]
-    diffs = [(s-side)//2 for s in ss]
+    x_as = box[0][0] - diffs
+    y_as = box[0][1] - diffs
+    x_bs = x_as + ss
+    y_bs = y_as + ss
 
-    x_as = [window[0][0] - diff for diff in diffs]
-    y_as = [window[0][1] - diff for diff in diffs]
-    x_bs = [x_as[i] + s for i, s in enumerate(ss)]
-    y_bs = [y_as[i] + s for i, s in enumerate(ss)]
+    return np.vstack([x_as, y_as, x_bs, y_bs]).T.reshape((-1,2,2)) + scheme
 
-    boxes = [np.vstack([x_as[i], y_as[i], x_bs[i], y_bs[i]]).T.reshape((-1,2,2)) + scheme[i]
-            for i in range(len(scales))]
-    boxes_scaled = [(wins[i]/scales[i]).astype(int) for i in range(len(scales))]
-    return scales, boxes, boxes_scaled
+
 
 
 def inscribed_square(box):
@@ -110,55 +134,66 @@ class car_detector:
 
         self.cached_lazy = []
 
-    # Define a single function that can extract features using hog sub-sampling and make predictions
 
-    ## 1 ##
-    # calculate the hog features for the region of interest defined by self.pos
+
+    ## 1. BLOCK SEARCH ##
+
+    # calculate the hog features
+    # for the region of interest
+    # defined by self.pos
 
     def set_pos(self, pos):
         self.pos = pos
 
     def _block_search(self, img):
+        """
+        calculate the hog blocks and implemet exhausted search
+
+        # TODO: make it possible for pre design windows search
+        """
         bboxes = []
-        for p in self.pos:
+        for p in self.pos: # iterate through all the positions
             ystart, ystop, scale = p
             roi = img[ystart:ystop,:,:]
-            roi = cv2.cvtColor(roi, CVT[cspace])
 
             # further cars are smaller
             if scale != 1:
                 im_shape = roi.shape
                 roi = cv2.resize(roi, (np.int(im_shape[1]/scale), np.int(im_shape[0]/scale)))
 
-            ch_ids = hog_ch if hasattr(hog_ch, "__len__") else [hog_ch]
-            rois = [roi[:,:,ch] for ch in ch_ids]
-            hog_ims = self.pool.map(hog_feat, rois)
+            # we only calculate the hog map once
+            hog_im = hog_feat(roi)
 
             # Define blocks and steps as above
             blocks_per_window = (window // ppc) - 1
-            nyblocks, nxblocks = hog_ims[0].shape[:2]
+            nyblocks, nxblocks = hog_im.shape[:2]
             nxsteps = (nxblocks - blocks_per_window) // self.cells_per_step
             nysteps = (nyblocks - blocks_per_window) // self.cells_per_step
 
-            #bboxes = self.cached_bboxes
+
             bboxes = []
             ypos = 0
             xpos = 0
+            roi = cv2.cvtColor(roi, CVT[cspace])
             for xb in range(nxsteps):
                 for yb in range(nysteps):
                     ypos = yb*self.cells_per_step
                     xpos = xb*self.cells_per_step
-                    # sub-area for hog
+
+                    # sub-area for hog map
                     y_end = ypos + blocks_per_window
                     x_end = xpos + blocks_per_window
 
                     xleft = xpos*ppc
                     ytop = ypos*ppc
-                    hog_ravel = np.hstack([hg[ypos:y_end, xpos:x_end].ravel() for hg in hog_ims])
+                    hog_ravel = hog_im[ypos:y_end, xpos:x_end].ravel()
+
+                    # the actual subimg
                     subimg = roi[ytop:ytop+window, xleft:xleft+window]
                     features = self.feat_maker.get_feat(subimg, hog_ravel, cvt = False)
                     test_features = self.scaler.transform(features.reshape((1, -1)))
                     test_pred= self.clf.predict(test_features)
+
 
                     if test_pred == 1:
                         xbox_left = np.int(xleft*scale)
@@ -170,17 +205,21 @@ class car_detector:
 
 
 
-    ## 2 ##
-    # implement a pre-designed window search based on the self.box_info
+
+
+
+
+
+    ## 2. WINDOW SEARCH ##
+
+    # implement a pre-designed window
+    # search based on the self.box_info
 
 
     def set_windows(self, boxes_info):
         self.box_info = boxes_info
 
     def _window_search(self, img, lazy = False):
-        img = cv2.cvtColor(img, CVT[cspace])
-        ch_ids = hog_ch if hasattr(hog_ch, "__len__") else [hog_ch]
-
         bboxes = []
         h, w = img.shape[0], img.shape[1]
         scls, windows, windows_scaled = self.box_info if not lazy else self.lazy_info
@@ -190,57 +229,56 @@ class car_detector:
                 y_a, x_a = win_scaled[0] # from drawing index to query index
                 y_b, x_b = win_scaled[1]
                 subimg = resized_img[x_a:x_b, y_a:y_b]
-                feat = self.feat_maker.get_feat(subimg, cvt = False).reshape(1, -1)
+                feat = self.feat_maker.get_feat(subimg).reshape(1, -1)
                 test_feat = self.scaler.transform(feat)
                 test_pred = self.clf.predict(test_feat)
 
 
                 if test_pred == 1:
                     bboxes.append(tuple(map(tuple, windows[i][j])))
-        result_boxes = bboxes #+ self.cached_bboxes_1 + self.cached_bboxes_2
-        #self.cached_bboxes_2 = self.cached_bboxes_1
-        #self.cached_bboxes_1 = bboxes
+        result_boxes = bboxes + self.cached_bboxes_1 + self.cached_bboxes_2
+        self.cached_bboxes_2 = self.cached_bboxes_1
+        self.cached_bboxes_1 = bboxes
         return result_boxes
 
 
 
-    ## 3 ##
-    # lazy version of window search, based on the infected_box boxes
+
+
+
+
+
+    ## 3. LAZY SEARCH  ##
+    # lazy version of window search,
+    # based on the infected_box boxes
 
     def set_lazy(self, boxes_info):
         self.lazy_info = boxes_info
 
-    def _lazy_search(self, image):
-        img = np.copy(image)
+    def _lazy_search(self, img):
         if not self.cached_lazy:
-            self.cached_lazy = self.window_search(img)
+            self.cached_lazy = self._window_search(img)
             return self.cached_lazy
         else:
-            h, w = img.shape[0], img.shape[1]
-            img = cv2.cvtColor(img,CVT[cspace])
-            lazy_bboxes = self.window_search(img, lazy = True)
-            lazy_bboxes = []
-            for win in self.cached_lazy:
-                scales, windows, windows_scaled = infected_box(win)
-                for i, scl in enumerate(scales):
-                    for j, win_scaled in enumerate(windows_scaled[i]):
-                        y_a, x_a = win_scaled[0] # from drawing index to query index
-                        y_b, x_b = win_scaled[1]
-                        if y_a >= 0 and x_a >= 0 and y_b <= h - 1 and x_b <= w - 1:
-                            subimg = cv2.resize(img[x_a:x_b, y_a:y_b], (window, window))
-                            feat = self.feat_maker.get_feat(subimg, cvt = False).reshape(1, -1)
-                            test_feat = self.scaler.transform(feat)
-                            test_pred = self.clf.predict(test_feat)
+            # exhaustedly search neighboring boxes
+            lazy_bboxes = self._window_search(img, lazy = True)
+            for box in self.cached_lazy:
+                neiggbors = infected_box(box)
+                for neiggbor in neiggbors:
+                    x_a, y_a = neiggbor[0]
+                    x_b, y_b = neiggbor[1]
+                    subimg = cv2.resize(img[y_a:y_b, x_a:x_b], (window, window))
+                    feat = self.feat_maker.get_feat(subimg).reshape(1, -1)
+                    test_feat = self.scaler.transform(feat)
+                    test_pred = self.clf.predict(test_feat)
 
-                            if test_pred == 1:
-                                lazy_bboxes.append(tuple(map(tuple, windows[i][j])))
-            result_boxes = lazy_bboxes # + self.cached_bboxes_1 + self.cached_bboxes_2
-            #self.cached_bboxes_2 = self.cached_bboxes_1
-            #self.cached_bboxes_1 = lazy_bboxes
+                    if test_pred == 1:
+                        lazy_bboxes.append(tuple(map(tuple, neiggbor)))
+            result_boxes = lazy_bboxes
             return result_boxes
 
 
-    ## 4 ##
+    ## HEAT ##
     # the heatmap utility for calculating continuous boxes
 
     def _heatmap(self, shape, bboxes, thres):
@@ -251,24 +289,27 @@ class car_detector:
 
     def _draw_car_box(self, img, heatmap):
         labels = label(heatmap)
+        self.cache_lazy = []
         for car_num in range(1, labels[1] + 1):
             nonzero = (labels[0] == car_num).nonzero()
             # Identify x and y values of those pixels
             nonzeroy = np.array(nonzero[0])
             nonzerox = np.array(nonzero[1])
             bbox = ((np.min(nonzerox), np.min(nonzeroy)), (np.max(nonzerox), np.max(nonzeroy)))
-            #self.cached_bboxes_1.append(bbox)
+            self.cache_lazy.append(inscribed_square(bbox))
+            # self.cached_bboxes_1.append(inscribed_square(bbox))
             cv2.rectangle(img, bbox[0], bbox[1], (0,0,255), 2)
         return img
 
 
-    ## integrated ##
-    # the detecting functionalities integrating the functions above
+    ## INTEGRATED ##
+    # the detecting functionalities
+    # integrating the functions above
 
     def _find(self, img, find_style):
         im = cv2.blur(img, (5,5))
         car_boxes = find_style(im)
-        heat = self._heatmap(img.shape, car_boxes, 1)
+        heat = self._heatmap(img.shape, car_boxes, heat_tres)
         return self._draw_car_box(img, heat)
 
     def window_find(self, img):
@@ -281,19 +322,26 @@ class car_detector:
         return self._find(img, self._block_search)
 
 
+    ## visualzie the boxes
     def draw(self, img):
         """
         draw the detecting boxes from window_search
         """
-        car_boxes = self.window_search(im)
+        car_boxes = self._window_search(im)
         for car_box in car_boxes:
             cv2.rectangle(img, car_box[0], car_box[1], color = [0, 255, 0], thickness = 2)
         return img
 
 
+
+
+
+
+## Main ##
+
 positions = [(380, 700, 1.5), (380, 700, 1.5), (400, 700, 2.0)]
-normal_boexs = box_generator((360, 700), (0, 1280))
-lazy_boxes = box_generator((400, 700), (0, 1280), yd_ratio = 0.1, scales = [1.5,1.5,1.5,2.0])
+normal_boexs = box_generator((390, 600), (0, 1280))
+lazy_boxes = box_generator((370, 700), (0, 1280), yd_ratio = 0.3, scales = [1.5,2.0,3.0])
 out_path = './output_images'
 
 
@@ -328,20 +376,22 @@ def get_image_result(retrain, input_path, nb_per_class = 1000):
     detector.set_lazy(lazy_boxes)
     detector.set_pos(positions)
 
-    out_imgs = [detector.window_find(img) for img in imgs]
+    out_imgs = [detector.block_find(img) for img in imgs]
     for i in range(len(imgfs)):
         cv2.imwrite(os.path.join(out_path, imgf_names[i]), cv2.cvtColor(out_imgs[i], cv2.COLOR_RGB2BGR))
 
 
+if __name__ == "__main__":
 
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--retrain', action='store_true')
+    parser.add_argument('--nbtrain', nargs = 1)
+    parser.add_argument('--video')
+    args = parser.parse_args()
+    try:
+        nb_train = int(args.nbtrain[0])
+    except:
+        nb_train = None
+    #get_image_result(args.retrain, './test_images',nb_train)
 
-parser = argparse.ArgumentParser()
-parser.add_argument('--retrain', action='store_true')
-parser.add_argument('--nbtrain', nargs = 1)
-parser.add_argument('--video')
-args = parser.parse_args()
-try:
-    nb_train = int(args.nbtrain[0])
-except:
-    nb_train = None
-get_video(args.retrain, nb_train)
+    get_video(args.retrain,nb_train)

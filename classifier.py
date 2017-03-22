@@ -17,10 +17,9 @@ import pickle
 # params for the hog features #
 ###############################
 cspace = 'YCrCb'    # the color space
-hog_ch = 0, 1, 2  # the interested channels id
 ppc = 16 # pixels per cell
 cpb = 2  # cells per block
-ort = 8  # orientations
+ort = 6  # orientations
 window = 64 # sampling window (side)
 
 #################################
@@ -32,18 +31,15 @@ hist_bins = 16
 #########################################################
 # I hate the way cv2 convert color, so I created a dict #
 #########################################################
-CVT_train = {'HSV': cv2.COLOR_BGR2HSV,
-             'LUV': cv2.COLOR_BGR2LUV,
-             'HLS': cv2.COLOR_BGR2HLS,
-             'YUV': cv2.COLOR_BGR2YUV,
-           'YCrCb': cv2.COLOR_BGR2YCrCb,
-             'RGB': cv2.COLOR_BGR2RGB}
+
 
 CVT = {'HSV': cv2.COLOR_RGB2HSV,
        'LUV': cv2.COLOR_RGB2LUV,
        'HLS': cv2.COLOR_RGB2HLS,
        'YUV': cv2.COLOR_RGB2YUV,
-     'YCrCb': cv2.COLOR_RGB2YCrCb}
+     'YCrCb': cv2.COLOR_RGB2YCrCb,
+      'GRAY': cv2.COLOR_RGB2GRAY,
+       'RGB': cv2.COLOR_BGR2RGB}
 
 ###########################################
 # the paths, non for non-car, car for car #
@@ -70,10 +66,12 @@ def hog_feat(img, feat_vec=False):
     params:
         feat_vec: bool, whether to ravel the hog feature
     """
-    return hog(img, orientations=ort,
-                 pixels_per_cell=(ppc, ppc),
-                 cells_per_block=(cpb, cpb),
-                  transform_sqrt=False, feature_vector=feat_vec)
+    gray = CVT['GRAY']
+    im = cv2.cvtColor(img, gray)
+    return hog(im, orientations=ort,
+                pixels_per_cell=(ppc, ppc),
+                cells_per_block=(cpb, cpb),
+                 transform_sqrt=False, feature_vector=feat_vec)
 
 def color_bin_feat(img):
     """
@@ -116,24 +114,22 @@ class feature_maker:
 
     def get_feat(self, img = None, hog_ravel = None, cvt = True):
         """
-        if hog_ravel is set, skip the hog_feat process, if cvt is True,
-        skip the convertion
+        if hog_ravel is set, skip the hog_feat process
         """
-        if cvt:
-            img = cv2.cvtColor(img, CVT[cspace])
+
         feat = []
         if self.hog and hog_ravel is None:
-            chs = hog_ch if hasattr(hog_ch, "__len__") else [hog_ch]
-            for ch in chs:
-                feat.append(hog_feat(img[:,:,ch],feat_vec = True))
-
+            feat.append(hog_feat(img, feat_vec = True))
         else:
             feat.append(hog_ravel)
 
+        im = np.copy(img)
+        if (self.color_bins or self.color_hists) and cvt:
+            im = cv2.cvtColor(img, CVT[cspace])
         if self.color_bins:
-            feat.append(color_bin_feat(img))
+            feat.append(color_bin_feat(im))
         if self.color_hists:
-            feat.append(color_hist_feat(img))
+            feat.append(color_hist_feat(im))
 
         return np.concatenate(feat)
 
@@ -199,8 +195,8 @@ def from_paths(yes_paths, no_paths, nb_per_class,
 
     for f in tqdm(files):
         # read the images
-        im = cv2.cvtColor(cv2.imread(f), CVT_train[cspace])
-        feat = feat_maker.get_feat(im, cvt = False)
+        im = cv2.cvtColor(cv2.imread(f), CVT['RGB'])
+        feat = feat_maker.get_feat(im)
         X.append(feat)
 
     X = np.vstack(X)
@@ -235,7 +231,7 @@ def train_SVC(nb_per_class):
     # == 2 ==
     # train the LinearSVC classifier
 
-    clf = LinearSVC(random_state = 30)
+    clf = SVC(random_state = 30)
 
     print("\ntraining the %s..."%type(clf).__name__)
     start = time.time()
