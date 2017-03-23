@@ -16,9 +16,16 @@ from glob import glob
 #   Some pre-designed bboxes utils                 #
 ####################################################
 
-heat_tres = 2 # the detector believe an area where at least two boxes overlap.
+heat_thres = 2 # the detector believe an area where at least two boxes overlap.
+box_scales = [1.2,3.2,1.5,1.8,2.5,4.2]
+yd_ratio = 0.2
+xover = 0.9
 
-def box_generator(yoi, xoi, yd_ratio = 0.1, scales = [1.2,1.5,2.0,2.5,3.0], xover = 0.6):
+lazy_scales = [1.2,  2.5]
+lazy_xover = 0.3
+lazy_yd = 0.6
+
+def box_generator(yoi, xoi, yd_ratio = yd_ratio, scales = box_scales, xover = xover):
 
     """
     a windows generator that gives a the searching strategy
@@ -38,7 +45,7 @@ def box_generator(yoi, xoi, yd_ratio = 0.1, scales = [1.2,1.5,2.0,2.5,3.0], xove
 
     sizes = (np.array(scales)*window).astype(int)
     xsteps = (sizes*(1 - 1/np.array(scales)*xover)).astype(int)
-    ydists = np.cumsum((yd_ratio*sizes).astype(int)) + yoi[0]
+    ydists = (yd_ratio*sizes).astype(int) + yoi[0]
     begins = (width - sizes) % xsteps // 2
     nbs = (width - sizes) // xsteps + 1
 
@@ -60,7 +67,7 @@ def box_generator(yoi, xoi, yd_ratio = 0.1, scales = [1.2,1.5,2.0,2.5,3.0], xove
 
 
 
-def infected_box(box, bias = 0.1, nb = 2):
+def infected_box(box, bias_x = 0.5, bias_y = 0.15, nb = 3):
     """
     generate 8 neiggboring windows for a given box
 
@@ -72,10 +79,14 @@ def infected_box(box, bias = 0.1, nb = 2):
     return:
         a ndarray, boxes
     """
-    side = box[1][1] - box[0][1]
-    b = int(bias*side)
-    scheme = np.random.randint(-b, b, (nb, 2, 2))
-    return box + scheme
+    side_x = box[1][0] - box[0][0]
+    side_y = box[1][1] - box[0][1]
+    bx = int(bias_x*side_x)
+    by = int(bias_y*side_y)
+
+    scheme_x = np.random.randint(-bx, bx, (nb, 2, 1))
+    scheme_y = np.random.randint(-by, by, (nb, 2, 1))
+    return box + np.dstack((scheme_x, scheme_y))
 
 
 
@@ -230,7 +241,7 @@ class car_detector:
 
                 if test_pred == 1:
                     bboxes.append(tuple(map(tuple, windows[i][j])))
-        result_boxes = bboxes + self.cached_bboxes_1 + self.cached_bboxes_2
+        result_boxes = bboxes + self.cached_bboxes_1# + self.cached_bboxes_2
         self.cached_bboxes_2 = self.cached_bboxes_1
         self.cached_bboxes_1 = bboxes
         return result_boxes
@@ -251,81 +262,84 @@ class car_detector:
 
     def _lazy_search(self, img):
         h, w = img.shape[0], img.shape[1]
-        if not self.cached_lazy:
-            self.cached_lazy = self._window_search(img)
+        if len(self.cached_lazy) < 1:
+            bboxes = self._window_search(img)
+            self.cached_lazy = self._heat_box(img.shape, bboxes)
             return self.cached_lazy
         else:
             # exhaustedly search neighboring boxes
             lazy_bboxes = self._window_search(img, lazy = True)
             for box in self.cached_lazy:
-                neigbors = infected_box(box)
-                for neigbor in neigbors:
-                    x_a, y_a = max(neigbor[0][0], 0), max(neigbor[0][1], 0)
-                    x_b, y_b = min(neigbor[1][0], w - 1), min(neigbor[1][1], h - 1)
-                    subimg = cv2.resize(img[y_a:y_b, x_a:x_b], (window, window))
-                    feat = self.feat_maker.get_feat(subimg).reshape(1, -1)
-                    test_feat = self.scaler.transform(feat)
-                    test_pred = self.clf.predict(test_feat)
+                if box[0][1] - box[1][1] > 20:
+                    neigbors = infected_box(box)
+                    for neigbor in neigbors:
+                        x_a, y_a = max(neigbor[0][0], 0), max(neigbor[0][1], 0)
+                        x_b, y_b = min(neigbor[1][0], w - 1), min(neigbor[1][1], h - 1)
+                        subimg = cv2.resize(img[y_a:y_b, x_a:x_b], (window, window))
+                        feat = self.feat_maker.get_feat(subimg).reshape(1, -1)
+                        test_feat = self.scaler.transform(feat)
+                        test_pred = self.clf.predict(test_feat)
 
-                    if test_pred == 1:
-                        lazy_bboxes.append(tuple(map(tuple, neigbor)))
-            result_boxes = lazy_bboxes
-            return result_boxes
+                        if test_pred == 1:
+                            lazy_bboxes.append(tuple(map(tuple, neigbor)))
+
+            self.cached_lazy = self._heat_box(img.shape, lazy_bboxes)
+            return self.cached_lazy
 
 
     ## HEAT ##
     # the heatmap utility for calculating continuous boxes
-
-    def _heatmap(self, shape, bboxes, thres):
+    def _heat_box(self, shape, bboxes, thres = heat_thres):
+        """
+        get the overlapped area as boxes
+        """
         heat = np.zeros(shape)
         for bbox in bboxes:
             heat[bbox[0][1]:bbox[1][1], bbox[0][0]:bbox[1][0]] += 1
-        return (heat > thres).astype(int)
+        heatmap = (heat > thres).astype(int)
 
-    def _draw_car_box(self, img, heatmap):
+        result = []
         labels = label(heatmap)
-        self.cached_lazy = []
         for car_num in range(1, labels[1] + 1):
             nonzero = (labels[0] == car_num).nonzero()
             # Identify x and y values of those pixels
             nonzeroy = np.array(nonzero[0])
             nonzerox = np.array(nonzero[1])
             bbox = ((np.min(nonzerox), np.min(nonzeroy)), (np.max(nonzerox), np.max(nonzeroy)))
-            self.cached_lazy.append(inscribed_square(bbox))
-            # self.cached_bboxes_1.append(inscribed_square(bbox))
-            cv2.rectangle(img, bbox[0], bbox[1], (0,0,255), 2)
-        return img
+            result.append(bbox)
+        return result
 
 
     ## INTEGRATED ##
     # the detecting functionalities
     # integrating the functions above
 
+    ## visualzie the boxes
+    def draw(self, img, bboxes):
+        """
+        draw the detecting boxes from window_search
+        """
+        for box in bboxes:
+            cv2.rectangle(img, box[0], box[1], color = [0, 255, 0], thickness = 2)
+        return img
+
+
     def _find(self, img, find_style):
         im = cv2.blur(img, (5,5))
         car_boxes = find_style(im)
-        heat = self._heatmap(img.shape, car_boxes, heat_tres)
-        return self._draw_car_box(img, heat)
+        bboxes = self._heat_box(img.shape, car_boxes, heat_thres)
+        return self.draw(img, bboxes)
 
     def window_find(self, img):
         return self._find(img, self._window_search)
 
-    def lazy_find(self, img):
-        return self._find(img, self._lazy_search)
-
     def block_find(self, img):
         return self._find(img, self._block_search)
 
+    def lazy_find(self, img):
+        bboxes = self._lazy_search(img)
+        return self.draw(img, bboxes)
 
-    ## visualzie the boxes
-    def draw(self, img):
-        """
-        draw the detecting boxes from window_search
-        """
-        car_boxes = self._window_search(img)
-        for car_box in car_boxes:
-            cv2.rectangle(img, car_box[0], car_box[1], color = [0, 255, 0], thickness = 2)
-        return img
 
 
 
@@ -336,7 +350,7 @@ class car_detector:
 
 positions = [(380, 600, 1.5), (380, 450, 1.5), (500, 700, 2.0)]
 normal_boexs = box_generator((390, 600), (0, 1280))
-lazy_boxes = box_generator((370, 700), (0, 1280), yd_ratio = 0.3, scales = [1.6,1.8,3.0], xover = 0.4)
+lazy_boxes = box_generator((370, 660), (0, 1280), yd_ratio = lazy_yd, scales = lazy_scales, xover = lazy_xover)
 out_path = './output_images'
 
 
@@ -394,6 +408,6 @@ if __name__ == "__main__":
         nb_train = int(args.retrain[0])
     except:
         nb_train = None
-    #get_image_result(args.retrain, './test_images',nb_train)
+    # get_image_result(args.retrain, './test_images',nb_train)
 
     get_video(f, nb_train, style = args.style)

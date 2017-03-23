@@ -134,8 +134,8 @@ def color_bin_feat(img):
 ```
 
 
-##### 3. Interpreted Features
-The Features mentioned above is combined and scaled to unit variance using sklearn's `StandardScaler`.
+##### 3. Integrated Features
+The Features mentioned above is combined and scaled to unit variance using sklearn's `StandardScaler`. The final features is a 456 dimensional array.
 Here is the final parameters set:
 ```python
 ppc = 16
@@ -212,22 +212,22 @@ To apply heatmap we count the layers of bounding boxes for an overlapped area. W
 
 Here's how I implement heatmap on multiple boxes:
 ```python
-def _heatmap(self, shape, bboxes, thres):
+def _heat_box(self, shape, bboxes, thres = heat_thres):
     heat = np.zeros(shape)
     for bbox in bboxes:
         heat[bbox[0][1]:bbox[1][1], bbox[0][0]:bbox[1][0]] += 1
-    return (heat > thres).astype(int)
+    heatmap = (heat > thres).astype(int)
 
-def _draw_car_box(self, img, heatmap):
+    result = []
     labels = label(heatmap)
     for car_num in range(1, labels[1] + 1):
         nonzero = (labels[0] == car_num).nonzero()
+        # Identify x and y values of those pixels
         nonzeroy = np.array(nonzero[0])
         nonzerox = np.array(nonzero[1])
         bbox = ((np.min(nonzerox), np.min(nonzeroy)), (np.max(nonzerox), np.max(nonzeroy)))
-        self.cached_bboxes_1.append(inscribed_square(bbox))
-        cv2.rectangle(img, bbox[0], bbox[1], (0,0,255), 2)
-    return img
+        result.append(bbox)
+    return result
 ```
 
 
