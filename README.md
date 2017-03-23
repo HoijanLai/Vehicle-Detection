@@ -28,7 +28,7 @@ A simple demo is presented as a Jupyter notebook, [lab.ipynb](./lab.ipynb), but 
 I run the detection pipeline **WITHOUT**[1] cached frame on sample images in [./test_images]('./test_images') detection on those images is stored in [./output_images]('./output_images')
 [1]: The pipeline is currently designed mainly for detections on videos, therefore some inelegant changes should be made in the code to disabled caching.
 
-*  [project_output.mp4]('./project_output.mp4') is a sample result on video.
+*  [project_video_output.mp4]('./project_video_output.mp4') is a sample result on video.
 
 ##### Run
 Call format:
@@ -50,7 +50,7 @@ $ python find.py --filename ./test_video.mp4 lazy --retrain 8000
 Basically, inside a cells of pixel, HOG is a features set of an image that counts the gradients in different range of angles. This features in a cell can be present as a histogram in polar coordinate system. An image can have multiple cells of HOG features, which make up the HOG feature for the whole image.
 
 ###### Implementation
-OpenCV provides easy function to calculate the HOG feature for a given image(single channel). Here is the [original function](http://scikit-image.org/docs/dev/api/skimage.feature.html#skimage.feature.hog). I use only square cells and square blocks, so I wrap the function into a single function called `hog_feat`
+OpenCV provides easy function to calculate the HOG feature for a given image(single channel). Here is the [original function](http://scikit-image.org/docs/dev/api/skimage.feature.html#skimage.feature.hog). I use only square cells and square blocks, so I wrap the function into a single function called [`hog_feat`](./classifier.py#L62-L75)
 ```python
 def hog_feat(img, feat_vec=False):
     gray = CVT['GRAY']
@@ -107,7 +107,7 @@ Here is scatter plots for a car and non-car sample in HLS color space:
 We can take the projections of the scatter plot and form channel-based histograms. Below are car and non-car image in color histograms.
 ![](./presentation/hist.png)  
 ![](./presentation/non_hist.png)  
-The Implementation is pretty staightforward, we take an image, convert it into targeted color space which is stored in a global variables `cspace`, and calculated the histograms for each channel, the bin values than combined and make the histogram features:
+The Implementation is pretty staightforward, we take an image, convert it into targeted color space which is stored in a global variables `cspace`, and calculated the histograms for each channel, the bin values than combined and make the histogram features, check the [`color_hist_feat`](./classifier.py#L87-L94)
 
 ```python
 def color_hist_feat(img):
@@ -125,7 +125,7 @@ def color_hist_feat(img):
 A image can be interpreted as a two-dimensional field, color bins is a raveled version of the image. First takes the means of all the columns of the image and and then do the same for all the rows. These gives us 2 signal figures for one channel and 6 for 3 channels. Supposed we scaled the image to `8 x 8`, and we will get `8 x 8 x 3 = 192` columns/rows:
 ![](./presentation/bins.png)
 
-The implementation is also simple:
+The implementation [`color_bin_feat`](./classifier.py#L77-L85) is also simple: 
 ```python
 def color_bin_feat(img):
     colors = [cv2.resize(img[:,:,i], spatial_size).ravel()
@@ -135,7 +135,7 @@ def color_bin_feat(img):
 
 
 ##### 3. Integrated Features
-The Features mentioned above is combined and scaled to unit variance using sklearn's `StandardScaler`. The final features is a 456 dimensional array.
+The Features mentioned above is combined and scaled to unit variance using sklearn's [`StandardScaler`](http://scikit-learn.org/stable/modules/generated/sklearn.preprocessing.StandardScaler.html). The final features is a 456 dimensional array.
 Here is the final parameters set:
 ```python
 ppc = 16
@@ -145,11 +145,11 @@ cspace = 'YCrCb'
 spatial_size = (8, 8)
 hist_bins = 16
 ```
-I defined a class called [`feature maker`]() and saved the `StandardScaler` object, to make sure the feature making process is consistent in both training and detecting.
+I defined a class called [`feature maker`](./classifier.py#L98-L135) and saved the scaler object, to make sure the feature making process is consistent in both training and detecting.
 
 
 ### Training
-You might want to check the definition of  [`from_paths`]() function in [./classifier.py](./classifier.py) to know about how to draw data from file system, but nothing fancy.
+You might want to check the definition of  [`from_paths`](./classifier.py#L142-L212) function in [./classifier.py](./classifier.py) to know about how to draw data from file system, but nothing fancy.
 
 I used a SVC leaving all the parameters as default except setting a random_state. Here is  a training output:
 ```
@@ -179,14 +179,14 @@ The trained classifier, scaler and feature maker will be pickled and stored in [
 
 The first searching strategy is to first calculate HOG over the whole scaled region of interest and do exhaustedly searching. The HOG features are extracted from the calculated HOG blocks and ravel to fit in the classifier.
 
-The code is the [`_block_search`]() function in [./find.py](./find.py). This strategy needs position tokens to define the region of interest and the scale for scaling the area to fit 64x64 searching. An example: `(360, 600, 1.5)` means the region is from 360 to 600 vertically and the targeted window is 96x96 in size.
+The code is the [`_block_search`](./find.py#L150-L209) function in [./find.py](./find.py). This strategy needs position tokens to define the region of interest and the scale for scaling the area to fit 64x64 searching. An example: `(360, 600, 1.5)` means the region is from 360 to 600 vertically and the targeted window is 96x96 in size.
 
 NOTE: I haven't optimize `pos` for this strategy yet because this method is the slowest for now.
 
 ##### 2. Pre-designed Windows
 This is pretty easy to understand. In a certain perspective condition, vihecles show up near the vanishing point is smaller and close to each other and vice versa.
 
-Here I write a [`box_generator`]() functions in [./find.py](./find.py). A example call:
+Here I write a [`box_generator`](./find.py#L28-L64) functions in [./find.py](./find.py). A example call:
 ```
 box_generator((390, 600), (0, 1280), yd_ratio = 0.1,
                scales = [1.2,2.0,2.5,3.0,3.6], xover = 0.6)
@@ -240,4 +240,4 @@ This pipeline is not perfect. The most annoying is it is very slow. It takes me 
 The boxes is quite jumpy, this is because the designed bounding boxes is not perfect and heatmap is actually doing an and operation, which is too strong and would waste some boxes.
 
 ##### Improvement
-Convolutional Neural Network would save us. One of the most popular trick might be using [YOLO]()
+Convolutional Neural Network would save us. One of the most popular trick might be using [YOLO](https://pjreddie.com/darknet/yolo/)
