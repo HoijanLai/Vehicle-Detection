@@ -173,6 +173,7 @@ The trained classifier, scaler and feature maker will be pickled and stored in [
 
 
 ### Searching
+The code for search is based on a class called [`detector`](./find.py#L116-L341) in [./find.py](./find.py)
 ##### 1. Windows on HOG Blocks
 ![](./presentation/hog_sub.png)  
 [Image from Udacity Self Driving Car Nanodegree](https://udacity.com)  
@@ -210,7 +211,7 @@ Since the classifier is not perfect, it might take some other objects as vehicle
 
 To apply heatmap we count the layers of bounding boxes for an overlapped area. When the count is higher than the threshold, we believe there's a vehicle.  
 
-Here's how I implement heatmap on multiple boxes:
+Here's how I implement heatmap on multiple boxes, see the [`_heat_box`](./find.py#L292-L310)
 ```python
 def _heat_box(self, shape, bboxes, thres = heat_thres):
     heat = np.zeros(shape)
