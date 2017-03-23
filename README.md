@@ -15,20 +15,20 @@ A simple toolkit in Python for vehicle detection on images/frames using traditio
 NOTE: Tested on Ubuntu
 ##### Map
 * _Code Scripts_  
-  [classifier.py]('./classifier.py') : responsible for features generation from image files    
-  [find.py]('./find.py') : the pipeline for vehicle detection
+  [classifier.py](./classifier.py) : responsible for features generation from image files    
+  [find.py](./find.py) : the pipeline for vehicle detection
 
 * _Data_  
-You can use any 64x64 images for cars and non-cars to train the classifier. Just modified the paths for cars and non-cars in [find.py]('./find.py'). The data I use can be found [here](https://github.com/udacity/CarND-Vehicle-Detection), provided by [Udacity](https://udacity.com).
+You can use any 64x64 images for cars and non-cars to train the classifier. Just modified the paths for cars and non-cars in [find.py](./find.py). The data I use can be found [here](https://github.com/udacity/CarND-Vehicle-Detection), provided by [Udacity](https://udacity.com).
 
 * _Demo_  
 A simple demo is presented as a Jupyter notebook, [lab.ipynb](./lab.ipynb), but this is only for making image for markdown writing.
 
 * _Result_  
-I run the detection pipeline **WITHOUT**[1] cached frame on sample images in [./test_images]('./test_images') detection on those images is stored in [./output_images]('./output_images')
+I run the detection pipeline **WITHOUT**[1] cached frame on sample images in [./test_images](./test_images) detection on those images is stored in [./output_images](./output_images)
 [1]: The pipeline is currently designed mainly for detections on videos, therefore some inelegant changes should be made in the code to disabled caching.
 
-*  [project_video_output.mp4]('./project_video_output.mp4') is a sample result on video.
+*  [project_video_output.mp4](./project_video_output.mp4) is a sample result on video.
 
 ##### Run
 Call format:
