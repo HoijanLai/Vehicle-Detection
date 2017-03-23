@@ -23,10 +23,10 @@ NOTE: Tested on Ubuntu
 You can use any 64x64 images for cars and non-cars to train the classifier. Just modified the paths for cars and non-cars in [find.py](./find.py). The data I use can be found [here](https://github.com/udacity/CarND-Vehicle-Detection), provided by [Udacity](https://udacity.com).
 
 * _Demo_  
-A simple demo is presented as a Jupyter notebook, [lab.ipynb](./lab.ipynb), but this is only for making image for markdown writing.
+A simple demo is presented as a Jupyter notebook, [lab.ipynb](./lab.ipynb), **BUT** this is only for making image for markdown writing.
 
 * _Result_  
-I run the detection pipeline **WITHOUT**[1] cached frame on sample images in [./test_images](./test_images) detection on those images is stored in [./output_images](./output_images)
+I run the detection pipeline **WITHOUT**[1] cached frame on sample images in [test_images](./test_images) detection on those images is stored in [output_images](./output_images)
 [1]: The pipeline is currently designed mainly for detections on videos, therefore some inelegant changes should be made in the code to disabled caching.
 
 *  [project_video_output.mp4](./project_video_output.mp4) is a sample result on video.
@@ -150,7 +150,7 @@ I defined a class called [`feature maker`](./classifier.py#L98-L135) and saved t
 
 
 ### Training
-You might want to check the definition of  [`from_paths`](./classifier.py#L142-L212) function in [./classifier.py](./classifier.py) to know about how to draw data from file system, but nothing fancy.
+You might want to check the definition of  [`from_paths`](./classifier.py#L142-L212) function in [classifier.py](./classifier.py) to know about how to draw data from file system, but nothing fancy.
 
 I used a SVC leaving all the parameters as default except setting a random_state. Here is  a training output:
 ```
@@ -170,25 +170,25 @@ prediction takes 3.38s
 0.9953125
 
 ```
-The trained classifier, scaler and feature maker will be pickled and stored in [./clf.pickle](./clf.pickle), which is loaded in [./find.py](.find.py)
+The trained classifier, scaler and feature maker will be pickled and stored in [clf.pickle](./clf.pickle), which is loaded in [find.py](.find.py)
 
 
 ### Searching
-The code for search is based on a class called [`detector`](./find.py#L116-L341) in [./find.py](./find.py)
+The code for search is based on a class called [`detector`](./find.py#L116-L341) in [find.py](./find.py)
 ##### 1. Windows on HOG Blocks
 ![](./presentation/hog_sub.png)  
 [Image from Udacity Self Driving Car Nanodegree](https://udacity.com)  
 
 The first searching strategy is to first calculate HOG over the whole scaled region of interest and do exhaustedly searching. The HOG features are extracted from the calculated HOG blocks and ravel to fit in the classifier.
 
-The code is the [`_block_search`](./find.py#L150-L209) function in [./find.py](./find.py). This strategy needs position tokens to define the region of interest and the scale for scaling the area to fit 64x64 searching. An example: `(360, 600, 1.5)` means the region is from 360 to 600 vertically and the targeted window is 96x96 in size.
+The code is the [`_block_search`](./find.py#L150-L209) function in [find.py](./find.py). This strategy needs position tokens to define the region of interest and the scale for scaling the area to fit 64x64 searching. An example: `(360, 600, 1.5)` means the region is from 360 to 600 vertically and the targeted window is 96x96 in size.
 
 NOTE: I haven't optimize `pos` for this strategy yet because this method is the slowest for now.
 
 ##### 2. Pre-designed Windows
 This is pretty easy to understand. In a certain perspective condition, vihecles show up near the vanishing point is smaller and close to each other and vice versa.
 
-Here I write a [`box_generator`](./find.py#L28-L64) functions in [./find.py](./find.py). A example call:
+Here I write a [`box_generator`](./find.py#L28-L64) functions in [find.py](./find.py). A example call:
 ```
 box_generator((390, 600), (0, 1280), yd_ratio = 0.1,
                scales = [1.2,2.0,2.5,3.0,3.6], xover = 0.6)
