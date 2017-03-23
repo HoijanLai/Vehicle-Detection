@@ -10,6 +10,7 @@ A simple toolkit in Python for vehicle detection on images/frames using traditio
 * [OpenCV](http://docs.opencv.org/3.0-beta/)
 * [MoviePy](https://zulko.github.io/moviepy/ref/VideoClip/VideoClip.html)
 * [scikit-image](http://scikit-image.org/)
+* [scikit-learn](http://scikit-learn.org/)
 * [Jupyter (optional)](http://jupyter.org/)
 
 NOTE: Tested on Ubuntu
